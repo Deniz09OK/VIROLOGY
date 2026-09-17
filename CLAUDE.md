@@ -25,7 +25,7 @@ nommé **s0P0wn3d**, opéré exclusivement dans un **environnement de lab isolé
 | Spécialisation   | Cybersécurité & Développement web                       |
 | Projet           | Virology — outil C2 offensif pédagogique (sujet v1.3)  |
 | Nom de l'outil   | s0P0wn3d                                                |
-| Langage          | Python (agent + serveur)                                |
+| Langage          | **Rust** (agent + serveur) — décision équipe 2026-09-17 |
 | Gestion de tâche | Jira (projet VIR)                                       |
 | Documentation    | Confluence (space VIR)                                  |
 
@@ -54,7 +54,7 @@ nommé **s0P0wn3d**, opéré exclusivement dans un **environnement de lab isolé
 
 | Composant       | Détail                                                           |
 |-----------------|------------------------------------------------------------------|
-| Host (C2)       | Machine physique Deniz — Python 3.12, Flask, cryptography        |
+| Host (C2)       | Machine physique Deniz — Rust / axum (c2_server), Rustup installé |
 | VM cible        | VirtualBox — Windows 11 Enterprise Eval x64 fr-fr (26200.6584)  |
 | Réseau          | host-only (192.168.56.0/24) + NAT (pas de Vagrant)              |
 | IP VM cible     | 192.168.56.111                                                   |
@@ -68,56 +68,128 @@ nommé **s0P0wn3d**, opéré exclusivement dans un **environnement de lab isolé
 
 ## Architecture cible
 
+Architecture **Cargo Workspace** — un seul dépôt, trois crates Rust isolés.
+
 ```
 s0P0wn3d/
-├── server/                  ← C2 controller (tourne sur le host)
-│   ├── main.py              ← point d'entrée
-│   ├── api/
-│   │   └── routes.py        ← endpoints Flask
-│   └── modules/             ← commandes côté serveur
-│       ├── shell.py
-│       ├── creds.py
-│       ├── keylog.py
-│       ├── loot.py
-│       ├── crack.py
-│       ├── pth.py
-│       ├── privesc.py
-│       ├── propagate.py
-│       ├── phish.py
-│       ├── rdp.py
-│       └── syscall.py
-├── agent/                   ← beacon / implant (tourne sur la VM cible)
-│   ├── beacon.py            ← boucle C2 principale
-│   └── modules/             ← capacités côté cible
-│       ├── shell.py
-│       ├── persistence.py
-│       ├── creds.py
-│       ├── keylog.py
-│       ├── loot.py
-│       ├── crack.py
-│       ├── pth.py
-│       ├── privesc.py
-│       ├── propagate.py
-│       ├── phish.py
-│       ├── rdp.py
-│       └── syscall.py
+├── Cargo.toml                     ← Déclaration du workspace global
+│
+├── shared/                        ← Composants partagés (crypto + protocole)
+│   └── src/
+│       ├── crypto.rs              ← AES-256-GCM (payloads session) + RSA-4096 (échange clés)
+│       └── protocol.rs            ← Sérialisation / désérialisation des échanges C2
+│
+├── c2_server/                     ← Team Server — tourne sur le host (axum)
+│   └── src/
+│       ├── main.rs                ← Point d'entrée, démarrage axum
+│       ├── routes.rs              ← Endpoints HTTP (GET /cmd, POST /output)
+│       ├── state.rs               ← Sessions agents, queue de commandes
+│       ├── handler.rs             ← Gestion sessions HTTP/2 ou DNS
+│       └── modules/               ← Logique côté serveur
+│           ├── shell.rs
+│           ├── creds.rs
+│           ├── keylog.rs
+│           ├── loot.rs
+│           ├── crack.rs
+│           ├── pth.rs
+│           ├── privesc.rs
+│           ├── propagate.rs
+│           ├── phish.rs
+│           ├── rdp.rs
+│           └── syscall.rs
+│
+├── implant/                       ← Agent Windows — compilé pour la VM cible
+│   └── src/
+│       ├── main.rs                ← Orchestrateur de l'agent (boucle beacon)
+│       ├── config.rs              ← Configuration obfusquée (IP, intervalle, cert fingerprint)
+│       ├── evasion/               ← Masquage et contournement EDR/AV
+│       │   ├── mod.rs
+│       │   ├── api_hashing.rs     ← Résolution dynamique API (masque l'IAT)
+│       │   └── obfuscation.rs     ← String obfuscation à la compilation (obfstr)
+│       ├── persistence/           ← Survie aux redémarrages
+│       │   ├── mod.rs
+│       │   ├── registry.rs        ← HKCU\...\Run (sans droits admin)
+│       │   ├── scheduled_task.rs  ← Scheduled Task — OneDrive Updater Service (T1036.005)
+│       │   └── watchdog.rs        ← RegisterWaitForSingleObject — relance si kill
+│       ├── communication/         ← Tunneling réseau C2
+│       │   ├── mod.rs
+│       │   ├── https.rs           ← Beacon HTTPS port 443 + jitter (T1071)
+│       │   └── dns.rs             ← DNS tunneling TXT port 53 (alternative)
+│       └── execution/             ← Interpréteur de commandes
+│           ├── mod.rs
+│           ├── shell.rs           ← cmd.exe / powershell CREATE_NO_WINDOW + pipes
+│           ├── creds.rs
+│           ├── keylog.rs
+│           ├── loot.rs
+│           ├── crack.rs
+│           ├── pth.rs
+│           ├── privesc.rs
+│           ├── propagate.rs
+│           ├── phish.rs
+│           ├── rdp.rs
+│           └── syscall.rs
+│
 ├── scripts/
-│   └── gen_cert.py          ← génère cert.pem / key.pem
+│   └── gen_cert.py                ← Génère cert.pem / key.pem (one-shot, Python only)
 ├── certs/
 │   ├── cert.pem
 │   └── key.pem
 ├── Docs/
 │   ├── virology-project.pdf
-│   └── VIR-XX_<slug>/          ← créé à chaque ticket terminé
-│       ├── README.md            ← description, MITRE ID, blue team note, auteur
-│       └── ...                  ← captures, scripts de test, etc.
-├── CLAUDE.md                    ← à la racine (lu par Claude Code et GitHub)
+│   └── VIR-XX_<slug>/             ← Créé à chaque ticket terminé
+│       ├── README.md              ← Description, MITRE ID, blue team note, auteur
+│       └── ...                    ← Captures, scripts de test, etc.
+├── CLAUDE.md                      ← À la racine (lu par Claude Code et GitHub)
 └── README.md
 ```
 
-**Canal C2 :** HTTPS port 443 — certificat RSA 2048 auto-signé (CN=update.microsoft.com)
+**Canal C2 :** HTTPS port 443 avec jitter aléatoire — RSA-4096 (échange initial) + AES-256-GCM (payloads session)
 
-### Décisions d'architecture confirmées
+### Profil de compilation — implant
+
+```toml
+# implant/Cargo.toml
+[profile.release]
+opt-level = "z"       # Optimisation taille binaire
+lto = true            # Link Time Optimization
+codegen-units = 1     # Meilleure optimisation
+panic = "abort"       # Supprime le formatage des panics
+strip = true          # Supprime tous les symboles de débogage
+```
+
+Toolchain : **MSVC** (`x86_64-pc-windows-msvc`) — binaire natif Windows sans dépendance mingw.
+
+### Scopes techniques — décisions d'architecture
+
+#### Scope 1 — Furtivité / Évasion AV
+
+- **Principal :** Obfuscation des strings à la compilation (`obfstr`) + résolution dynamique des API (API Hashing via `windows-rs`) pour masquer l'IAT
+- **Avancé :** Direct Syscalls pour bypasser les hooks EDR dans `ntdll.dll` (plus complexe à maintenir)
+- **Niveau d'intégrité :** Medium Integrity (utilisateur standard) par défaut — moins d'alertes comportementales immédiates
+
+#### Scope 2 — Persistence / Résilience
+
+- **Principal :** Registry `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` (sans droits admin)
+- **Alternative :** Scheduled Task (si surveillance registre stricte)
+- **Watchdog :** `RegisterWaitForSingleObject` — relance l'agent si tué
+
+#### Scope 3 — Communication C2
+
+- **Principal :** HTTPS port 443 avec jitter aléatoire sur l'intervalle de beacon (rompt les signatures de régularité)
+- **Crypto :** RSA-4096 pour l'échange de clés initial, AES-256-GCM pour les payloads de session
+- **Alternative :** DNS Tunneling TXT port 53 (si HTTP bloqué — mais très bruyant, détectable par NTA)
+
+#### Scope 4 — Exécution de commandes
+
+- Création de processus `cmd.exe` / `powershell.exe` avec flag `CREATE_NO_WINDOW`
+- Redirection stdout/stderr via **pipes anonymes** — capture en mémoire avant exfiltration
+
+#### Scope 5 — Anti-Forensics
+
+- Suppression **ciblée** des artefacts créés par l'agent (fichiers temp, clés registre spécifiques)
+- **⚠️ Ne jamais** utiliser `wevtutil cl Security` — génère l'Event ID 1102 (alerte critique SOC)
+
+---
 
 #### Persistence — Masquerading OneDrive (T1036.005 + T1053.005)
 
@@ -300,9 +372,10 @@ Dans le Task Manager : `OneDriveUpdaterService.exe — Microsoft Corporation`.
 ### Code
 
 - Un module = un fichier = une responsabilité unique
-- Pas de secrets, d'IPs ou de chemins hardcodés dans le code — utiliser un fichier de config (`config.py` ou `.env`)
-- Chaque module agent expose une fonction `run()` appelable depuis `beacon.py`
-- Pas de librairies all-in-one (Metasploit, Empire, Sliver) — low-level uniquement
+- Pas de secrets, d'IPs ou de chemins hardcodés — tout dans `implant/src/config.rs` (obfusqué à la compilation)
+- Chaque module `execution/` expose une fonction appelable depuis `main.rs` (dispatch de commandes)
+- Pas de librairies all-in-one (Metasploit, Empire, Sliver) — low-level `windows-rs` uniquement
+- Pas de `unwrap()` dans le code de prod — erreurs propagées avec `?` et types explicites
 
 ### Confluence
 
@@ -382,21 +455,59 @@ Dans le Task Manager : `OneDriveUpdaterService.exe — Microsoft Corporation`.
 | TA0005 | Tactic: Defense Evasion | https://attack.mitre.org/tactics/TA0005/ |
 | TA0006 | Tactic: Credential Access | https://attack.mitre.org/tactics/TA0006/ |
 
+### Stack Rust — crates utilisées
+
+| Crate | Crate(s) | Rôle | URL |
+|---|---|---|---|
+| `axum` | `c2_server` | Serveur HTTP/HTTPS côté Team Server | https://docs.rs/axum |
+| `reqwest` | `implant` | Client HTTPS côté beacon | https://docs.rs/reqwest |
+| `rustls` | `implant` + `c2_server` | TLS natif Rust sans OpenSSL | https://docs.rs/rustls |
+| `windows` | `implant` | WinAPI officielle Microsoft pour Rust | https://docs.rs/windows |
+| `serde` + `serde_json` | `shared` | Sérialisation commandes/réponses C2 | https://docs.rs/serde |
+| `tokio` | `implant` + `c2_server` | Runtime async | https://docs.rs/tokio |
+| `obfstr` | `implant` | Obfuscation des strings à la compilation | https://docs.rs/obfstr |
+| `aes-gcm` | `shared` | Chiffrement AES-256-GCM des payloads | https://docs.rs/aes-gcm |
+| `rsa` | `shared` | RSA-4096 pour l'échange de clés initial | https://docs.rs/rsa |
+| `clap` | `c2_server` | Parsing arguments CLI serveur | https://docs.rs/clap |
+
+### Compilation Windows — toolchain MSVC
+
+La toolchain cible est **MSVC** (pas mingw) pour produire un binaire natif Windows propre.
+
+```bash
+# Depuis Windows (ou VM Windows de dev) — installation toolchain MSVC
+rustup target add x86_64-pc-windows-msvc
+
+# Build de l'implant (depuis le workspace root)
+cargo build -p implant --target x86_64-pc-windows-msvc --release
+# produit : target/x86_64-pc-windows-msvc/release/implant.exe
+```
+
+```toml
+# .cargo/config.toml (workspace root)
+[target.x86_64-pc-windows-msvc]
+rustflags = ["-C", "target-feature=+crt-static"]  # CRT statique, zéro DLL externe
+```
+
+> **Note cross-compilation depuis Linux :** La toolchain MSVC nécessite les headers Windows
+> (non disponibles sur Linux sans Wine/LLVM-MinGW). Compiler l'implant directement sur la VM
+> Windows de dev ou via GitHub Actions (windows-latest runner).
+
 ### Documentation technique
 
 | Ressource | URL |
 |---|---|
-| Python `cryptography` | https://cryptography.io/en/latest/ |
-| OpenSSL Docs | https://www.openssl.org/docs/ |
+| The Rust Book | https://doc.rust-lang.org/book/ |
+| Rust by Example | https://doc.rust-lang.org/rust-by-example/ |
+| axum Docs | https://docs.rs/axum/latest/axum/ |
+| windows-rs Docs | https://microsoft.github.io/windows-docs-rs/ |
 | Wireshark User Guide | https://www.wireshark.org/docs/wsug_html_chunked/ |
 | Wireshark Wiki — TLS | https://wiki.wireshark.org/TLS |
 | Microsoft — ReadProcessMemory | https://learn.microsoft.com/en-us/windows/win32/api/memoryapi/nf-memoryapi-readprocessmemory |
 | Microsoft — AMSI | https://learn.microsoft.com/en-us/windows/win32/amsi/antimalware-scan-interface-portal |
 | Microsoft — Processes & Threads | https://learn.microsoft.com/en-us/windows/win32/procthread/processes-and-threads |
+| Microsoft — Task Scheduler API | https://learn.microsoft.com/en-us/windows/win32/taskschd/task-scheduler-start-page |
 | Root-Me — Network Challenges | https://www.root-me.org/en/Challenges/Network/ |
-| Flask Docs | https://flask.palletsprojects.com/en/stable/ |
-| PyInstaller | https://pyinstaller.org/en/stable/ |
-| Windows Task Scheduler API | https://learn.microsoft.com/en-us/windows/win32/taskschd/task-scheduler-start-page |
 
 ---
 
@@ -407,7 +518,7 @@ Dans le Task Manager : `OneDriveUpdaterService.exe — Microsoft Corporation`.
 - **Double lecture** — pour chaque module, ajouter une courte note blue team
   (comment le détecter : Sigma rule, événement Windows, indicateur réseau).
 - **Langue** — réponses en français, commentaires de code en anglais.
-- **Style Python** — fonctions courtes, responsabilité unique, type hints.
+- **Style Rust** — fonctions courtes, responsabilité unique par module, pas de `unwrap()` dans le code de prod (utiliser `?` + types d'erreurs explicites).
 - **Références Jira** — utiliser les épics CORE-1 à CORE-6 et EXT-1 pour contextualiser
   les tâches.
 - **MITRE ATT&CK** — tagger chaque nouvelle capacité avec son ID tactic/technique.
