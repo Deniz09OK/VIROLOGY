@@ -239,7 +239,7 @@ Dans le Task Manager : `OneDriveUpdaterService.exe — Microsoft Corporation`.
 
 | Ticket | Tâche | Assigné | Statut |
 |--------|-------|---------|--------|
-| VIR-25 | Design architecture C2 — schéma implant ↔ controller | Deniz Ok | 🔜 À faire |
+| VIR-25 | Design architecture C2 — schéma implant ↔ controller | Deniz Ok | ✅ Terminé |
 | VIR-26 | Setup environment manifest reproductible (VirtualBox) | Deniz Ok | 🔜 À faire |
 | VIR-27 | Mise en place gitflow (3 branches min, règles de commit) | Deniz Ok | 🔜 À faire |
 
