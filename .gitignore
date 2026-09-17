@@ -1,3 +1,8 @@
+# s0P0wn3d — never commit certs or exfiltrated data
+certs/cert.pem
+certs/key.pem
+loot/
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]
