@@ -22,10 +22,10 @@
 
 ```bash
 feat(VIR-25): ajout de la boucle principale du beacon HTTPS
-feat(VIR-26): squelette serveur Flask + endpoint /cmd
+feat(VIR-26): squelette c2_server avec endpoint /cmd (axum)
 fix(VIR-28): correction encodage stdout du module shell sous Windows
 docs(VIR-25): ajout doc Docs/VIR-25_c2-setup/README.md
-refactor(VIR-30): séparation du chargement TLS dans utils.py
+refactor(VIR-30): séparation du chargement TLS dans communication/https.rs
 chore: ajout de certs/ au .gitignore
 ```
 
@@ -68,8 +68,8 @@ git push -u origin feat/VIR-25-beacon-loop
 
 ```bash
 # Exemple ticket terminé
-git add agent/modules/shell.py Docs/VIR-28_shell-module/
-git commit -m "feat(VIR-28): ajout du module shell distant via subprocess"
+git add implant/src/execution/shell.rs Docs/VIR-28_shell-module/
+git commit -m "feat(VIR-28): ajout du module shell distant via pipes anonymes"
 ```
 
 ---
@@ -97,10 +97,10 @@ git checkout main && git pull
 git checkout -b feat/VIR-25-beacon-loop
 
 # 2. Coder + commiter au fil de l'eau
-git add agent/beacon.py
+git add implant/src/communication/https.rs
 git commit -m "feat(VIR-25): squelette de la boucle polling du beacon"
 
-git add agent/beacon.py
+git add implant/src/communication/https.rs
 git commit -m "feat(VIR-25): ajout requête HTTPS avec vérification du certificat"
 
 # 3. Ticket terminé → ajouter la doc
