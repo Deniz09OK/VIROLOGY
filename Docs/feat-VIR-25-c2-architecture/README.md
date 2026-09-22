@@ -156,6 +156,23 @@ s0P0wn3d/
 
 ---
 
+## Inspirations architecturales
+
+Ce design s'inspire de deux frameworks C2 open-source de référence, **uniquement sur le plan architectural** — aucun code n'est réutilisé.
+
+| Framework | Ce qu'on en retient |
+|---|---|
+| **Metasploit** | Séparation claire handler (serveur) / payload (implant), pattern de staging, queue de tâches par session |
+| **Sliver** | Architecture Go/Rust avec workspace multi-crates, canal HTTPS avec certificat auto-signé, beacon poll + jitter, chiffrement de session asymétrique + symétrique |
+
+### Différences volontaires avec ces frameworks
+
+- **Pas de staging** — l'implant est un binaire autonome (simplifie l'architecture pour un lab pédagogique)
+- **Pas de listener générique** — un seul canal HTTPS (pas de SMB/TCP raw/DNS en parallèle)
+- **Low-level windows-rs** uniquement — pas de dépendance à des librairies all-in-one
+
+---
+
 ## Compilation
 
 ```bash
